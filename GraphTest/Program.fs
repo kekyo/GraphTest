@@ -8,6 +8,7 @@ open Microsoft.FSharp.Control
 open Shields.GraphViz.Models
 open Shields.GraphViz.Components
 open Shields.GraphViz.Services
+open System.Numerics
 
 //////////////////////////////////////////////////////////////////////////
 // グラフ構築に必要な定義
@@ -74,6 +75,14 @@ let typeName (typ: Type) =
 let toDictionary (xs: ('T * 'U) seq) =
     new Dictionary<_, _>(xs |> Seq.map(fun (k, v) -> new KeyValuePair<_, _>(k, v))) :> IReadOnlyDictionary<_, _>
 
+// 指定された関数が返す値が続く限り、個々の要素をシーケンスとして結合する関数
+let traverse (predict: 'T -> 'T) (value: 'T) = seq {
+    let mutable current = value
+    while current <> null do
+        yield current
+        current <- predict current
+}
+
 //////////////////////////////////////////////////////////////////////////
 
 // メインプログラム
@@ -93,7 +102,7 @@ let mainAsync argv = async {
         |> Seq.toList
 
     ////////////////////////////////////////////////////////////////////
-    // 集計処理
+    // 1. 集計処理
 
     // 各型から派生する型群を取得できる辞書を生成する。
     // 以下のような関係の型について、BaseTypeからDerivedType群を取得できる。
@@ -108,17 +117,22 @@ let mainAsync argv = async {
         |> toDictionary
 
     //////////////////////////////////
-    // 1. 次数
+    // 1-1. 次数
 
     // 最大次数を計算する。
     // derivedTypesから最大の次数を検索する。
     let maxDegreeDistribution =
-        derivedTypes |> Seq.map(fun kv -> kv.Value.Length) |> Seq.max |> float
+        derivedTypes |> Seq.map(fun kv -> kv.Value.Length) |> Seq.max
+
+    // edgeの総数を得る。
+    // derivedTypesの次数を全て加算する。
+    let edgeCount =
+        derivedTypes |> Seq.fold(fun v kv -> kv.Value.Length + v) 0
 
     // 平均次数を計算する。
-    // derivedTypesの次数を全て加算し、最大次数で割る。
+    // derivedTypesの次数を全て加算（=edgeの総数）し、最大次数で割る。
     let averageForDegreeDistribution =
-        (derivedTypes |> Seq.fold(fun v kv -> (kv.Value.Length |> float) + v) 0.0) / maxDegreeDistribution
+        (edgeCount |> float) / (maxDegreeDistribution |> float)
 
     // 次数分布を出力する。
     // 次数0についてはderivedTypesに含まれないため、出力されない。
@@ -129,14 +143,61 @@ let mainAsync argv = async {
         |> Seq.sortByDescending(fun kv -> kv.Value.Length)
         |> Seq.iter(fun kv -> printfn "  %s: %d" (typeName kv.Key) (kv.Value.Length))
 
+    printfn ""
+    printfn "================================="
+
     //////////////////////////////////
-    // 2. 密度
+    // 1-2. 密度
 
+    // edgeの最大数を計算する。
+    // 有向グラフなので： D = V(V - 1)
+    let maxEdgeCount =
+        types.Length * (types.Length - 1)
 
+    // 密度を得る。
+    let graphDensity =
+        (edgeCount |> float) / (maxEdgeCount |> float)
+    printfn ""
+    printfn "Density: %f (%d / %d)" graphDensity edgeCount maxEdgeCount
+
+    printfn ""
+    printfn "================================="
+
+    //////////////////////////////////
+    // 1-3. 距離
+
+    // 有向グラフの場合、到達不可能な型が存在すると、距離が無限大として定義される。
+    // （そして.NETの型システムで、基底型へのedgeを扱う限り、必ず無限大になる）
+    // ここでは、ある型がobj型（唯一の基底型）に到達できるので、この距離を算出してみる。
+    // この距離がわかると、派生している型群の長短がわかる。
+    // その結果、不用意に継承を行っている型がないかどうか、という事がわかるようになる。
+
+    // ある型が、obj型に到達するための距離を計算し、辞書化する。
+    let distanceToObject =
+        // 基底型（baseType）を辿り、obj型までの距離を辞書の値とする。
+        types
+        |> Seq.map(fun typ -> (typ, typ.BaseType |> traverse (fun typ -> typ.BaseType) |> Seq.length))
+        |> toDictionary
+
+    printfn ""
+    printfn "Distance:"
+    distanceToObject
+        |> Seq.sortByDescending(fun kv -> kv.Value)
+        |> Seq.iter(fun kv -> printfn "  %s: %d" (typeName kv.Key) kv.Value)
+
+    printfn ""
+    printfn "================================="
     
+    //////////////////////////////////
+    // 1-4. クラスター係数
+
+
+
+
+
 
     ////////////////////////////////////////////////////////////////////
-    // グラフを図に出力する
+    // 2. グラフを図に出力する
 
     // 全ての型を列挙して、その型の基底型が存在する場合に、有向グラフを構築する再帰関数
     let rec constructGraph dgraph (types: Type list) =
@@ -157,7 +218,7 @@ let mainAsync argv = async {
     // 有向グラフを構築する
     let dgraph = types |> constructGraph (genDirectedGraph())
 
-    // グラフを出力する
+    // GraphVizを使用して、グラフを出力する
     do! dgraph |> renderAsync "test.svg" RendererFormats.Svg
 }
 
