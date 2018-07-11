@@ -106,9 +106,9 @@ let mainAsync argv = async {
 
     // 各型から派生する型群を取得できる辞書を生成する。
     // 以下のような関係の型について、BaseTypeからDerivedType群を取得できる。
-    // BaseType --+-- DerivedType1
-    //            +-- DerivedType2
-    //            +-- DerivedType3
+    // BaseType <--+-- DerivedType1
+    //             +-- DerivedType2
+    //             +-- DerivedType3
     let derivedTypes =
         types
         |> Seq.filter(fun typ -> typ.BaseType <> null)
@@ -150,7 +150,7 @@ let mainAsync argv = async {
     // 1-2. 密度
 
     // edgeの最大数を計算する。
-    // 有向グラフなので： D = V(V - 1)
+    // 有向グラフなので： Emax = V(V - 1)
     let maxEdgeCount =
         types.Length * (types.Length - 1)
 
@@ -172,6 +172,9 @@ let mainAsync argv = async {
     // この距離がわかると、派生している型群の長短がわかる。
     // その結果、不用意に継承を行っている型がないかどうか、という事がわかるようになる。
 
+    // obj <-- DerivedType1 <-- DerivedType2 <-- DerivedType3
+    //      3                2                1
+
     // ある型が、obj型に到達するための距離を計算し、辞書化する。
     let distanceToObject =
         // 基底型（baseType）を辿り、obj型までの距離を辞書の値とする。
@@ -179,8 +182,17 @@ let mainAsync argv = async {
         |> Seq.map(fun typ -> (typ, typ.BaseType |> traverse (fun typ -> typ.BaseType) |> Seq.length))
         |> toDictionary
 
+    // 距離の平均を計算する。
+    // 距離の合計を個数で割る。
+    let averageForDistance =
+        (distanceToObject
+         |> Seq.map(fun kv -> kv.Value)
+         |> Seq.reduce(fun v1 v2 -> v1 + v2)
+         |> float)
+        / (distanceToObject.Count |> float)
+
     printfn ""
-    printfn "Distance:"
+    printfn "Distance: Average=%f" averageForDistance
     distanceToObject
         |> Seq.sortByDescending(fun kv -> kv.Value)
         |> Seq.iter(fun kv -> printfn "  %s: %d" (typeName kv.Key) kv.Value)
@@ -191,9 +203,35 @@ let mainAsync argv = async {
     //////////////////////////////////
     // 1-4. クラスター係数
 
+    // 距離同様、ある型の基底型は、いづれobj型に到達するため、
+    // クラスターを構成する集合は、以下のような場合に限られる:
 
+    // obj <-- Type1 <--+-- DerivedType21
+    //                  +-- DerivedType22 <--+-- DerivedType31
+    //                  +-- DerivedType23    +-- DerivedType32
+    //     [x]          [3]                  [2]
+    
+    // 上記の状態で、Cobj = (3 + 2) / (6 * (6 - 1)) = 5/30
+    // 単一方向のedgeのみでグラフが構成されていると、クラスター係数は小さくなる。
+    // （クラスター係数を計上するedgeは、一般の矢印とは逆方向で計算する）
 
+    // 指定された型の派生型を全て探索し、全ての派生型数を取得する関数
+    let calculateCluster typ =
+        // fcは再帰探索する場合だけ、派生型の数を取得する関数（ts.Length）にすり替える。
+        let rec sumEdges (fc: Type[] -> int) (typ: Type) : int =
+            match derivedTypes.TryGetValue(typ) with
+            // 派生型のリストが得られたら、それぞれについて再帰的に派生型を取得する
+            | true, types -> (fc types) + (types |> Seq.map(sumEdges (fun ts -> ts.Length)) |> Seq.sum)
+            | _ -> 0
+        
+        // fcの初期関数は常に0を返すので、最初のedge（objとその派生型間）は計上されない。
+        let value = sumEdges (fun _ -> 0) typ
+        (value |> float) / (types.Length |> float)
 
+    //
+    types |> Seq.iter(fun typ ->
+        let cluster = calculateCluster typ
+        printfn "  %s: %f" (typeName typ) (cluster))
 
 
     ////////////////////////////////////////////////////////////////////
