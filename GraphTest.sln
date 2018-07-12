@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.27703.2035
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "GraphTest", "GraphTest\GraphTest.fsproj", "{64EC2BC4-D9D8-40FD-9D5B-71AD29F24802}"
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "GraphTest", "GraphTest\GraphTest.fsproj", "{4CAC9001-6418-42CA-9022-48D23B3AFB24}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -11,10 +11,10 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{64EC2BC4-D9D8-40FD-9D5B-71AD29F24802}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{64EC2BC4-D9D8-40FD-9D5B-71AD29F24802}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{64EC2BC4-D9D8-40FD-9D5B-71AD29F24802}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{64EC2BC4-D9D8-40FD-9D5B-71AD29F24802}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4CAC9001-6418-42CA-9022-48D23B3AFB24}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4CAC9001-6418-42CA-9022-48D23B3AFB24}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4CAC9001-6418-42CA-9022-48D23B3AFB24}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4CAC9001-6418-42CA-9022-48D23B3AFB24}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

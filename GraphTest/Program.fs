@@ -1,6 +1,7 @@
 ﻿open System
 open System.Collections.Generic
 open System.IO
+open System.Text
 open System.Threading
 
 open Microsoft.FSharp.Control
@@ -8,7 +9,6 @@ open Microsoft.FSharp.Control
 open Shields.GraphViz.Models
 open Shields.GraphViz.Components
 open Shields.GraphViz.Services
-open System.Numerics
 
 //////////////////////////////////////////////////////////////////////////
 // グラフ構築に必要な定義
@@ -73,7 +73,9 @@ let typeName (typ: Type) =
     
 // 2値タプルのシーケンスから辞書を生成する関数
 let toDictionary (xs: ('T * 'U) seq) =
-    new Dictionary<_, _>(xs |> Seq.map(fun (k, v) -> new KeyValuePair<_, _>(k, v))) :> IReadOnlyDictionary<_, _>
+    let dict = new Dictionary<'T, 'U>()
+    xs |> Seq.iter(fun (k, v) -> dict.Add(k, v))
+    dict :> IReadOnlyDictionary<_, _>
 
 // 指定された関数が返す値が続く限り、個々の要素をシーケンスとして結合する関数
 let traverse (predict: 'T -> 'T) (value: 'T) = seq {
@@ -81,6 +83,16 @@ let traverse (predict: 'T -> 'T) (value: 'T) = seq {
     while current <> null do
         yield current
         current <- predict current
+}
+
+// ログ出力を行う関数
+let writeLogAsync fileName (title: string) (xs: ('T * 'U) seq) = async {
+    use file = new FileStream(fileName, FileMode.Create, FileAccess.ReadWrite, FileShare.None, 16384, true)
+    let tw = new StreamWriter(file, Encoding.UTF8)
+    do! tw.WriteLineAsync(title)
+    for k, v in xs do
+        do! tw.WriteLineAsync(sprintf "%A,%A" k v)
+    do! tw.FlushAsync()
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -136,15 +148,13 @@ let mainAsync argv = async {
 
     // 次数分布を出力する。
     // 次数0についてはderivedTypesに含まれないため、出力されない。
-    printfn "Degree distribution: %d / %d, Average=%f" derivedTypes.Count types.Length averageForDegreeDistribution
+    let title = sprintf "Degree distribution,%d,%d,%f" derivedTypes.Count types.Length averageForDegreeDistribution
     // DerivedType群の量でソートして出力する。
-    derivedTypes
+    do! derivedTypes
         // 派生型が多い順にソートする
         |> Seq.sortByDescending(fun kv -> kv.Value.Length)
-        |> Seq.iter(fun kv -> printfn "  %s: %d" (typeName kv.Key) (kv.Value.Length))
-
-    printfn ""
-    printfn "================================="
+        |> Seq.map(fun kv -> typeName kv.Key, kv.Value.Length)
+        |> writeLogAsync "DegreeDistribution.csv" title
 
     //////////////////////////////////
     // 1-2. 密度
@@ -157,11 +167,9 @@ let mainAsync argv = async {
     // 密度を得る。
     let graphDensity =
         (edgeCount |> float) / (maxEdgeCount |> float)
-    printfn ""
-    printfn "Density: %f (%d / %d)" graphDensity edgeCount maxEdgeCount
-
-    printfn ""
-    printfn "================================="
+    let title = sprintf "Density,%f,%d,%d" graphDensity edgeCount maxEdgeCount
+    do! []
+        |> writeLogAsync "Density.csv" title
 
     //////////////////////////////////
     // 1-3. 距離
@@ -184,55 +192,18 @@ let mainAsync argv = async {
 
     // 距離の平均を計算する。
     // 距離の合計を個数で割る。
-    let averageForDistance =
-        (distanceToObject
+    let totalDistance =
+        distanceToObject
          |> Seq.map(fun kv -> kv.Value)
          |> Seq.reduce(fun v1 v2 -> v1 + v2)
-         |> float)
-        / (distanceToObject.Count |> float)
+    let averageForDistance =
+        (totalDistance |> float) / (distanceToObject.Count |> float)
 
-    printfn ""
-    printfn "Distance: Average=%f" averageForDistance
-    distanceToObject
+    let title = sprintf "Distance,%f,%d,%d" averageForDistance totalDistance distanceToObject.Count
+    do! distanceToObject
         |> Seq.sortByDescending(fun kv -> kv.Value)
-        |> Seq.iter(fun kv -> printfn "  %s: %d" (typeName kv.Key) kv.Value)
-
-    printfn ""
-    printfn "================================="
-    
-    //////////////////////////////////
-    // 1-4. クラスター係数
-
-    // 距離同様、ある型の基底型は、いづれobj型に到達するため、
-    // クラスターを構成する集合は、以下のような場合に限られる:
-
-    // obj <-- Type1 <--+-- DerivedType21
-    //                  +-- DerivedType22 <--+-- DerivedType31
-    //                  +-- DerivedType23    +-- DerivedType32
-    //     [x]          [3]                  [2]
-    
-    // 上記の状態で、Cobj = (3 + 2) / (6 * (6 - 1)) = 5/30
-    // 単一方向のedgeのみでグラフが構成されていると、クラスター係数は小さくなる。
-    // （クラスター係数を計上するedgeは、一般の矢印とは逆方向で計算する）
-
-    // 指定された型の派生型を全て探索し、全ての派生型数を取得する関数
-    let calculateCluster typ =
-        // fcは再帰探索する場合だけ、派生型の数を取得する関数（ts.Length）にすり替える。
-        let rec sumEdges (fc: Type[] -> int) (typ: Type) : int =
-            match derivedTypes.TryGetValue(typ) with
-            // 派生型のリストが得られたら、それぞれについて再帰的に派生型を取得する
-            | true, types -> (fc types) + (types |> Seq.map(sumEdges (fun ts -> ts.Length)) |> Seq.sum)
-            | _ -> 0
-        
-        // fcの初期関数は常に0を返すので、最初のedge（objとその派生型間）は計上されない。
-        let value = sumEdges (fun _ -> 0) typ
-        (value |> float) / (types.Length |> float)
-
-    //
-    types |> Seq.iter(fun typ ->
-        let cluster = calculateCluster typ
-        printfn "  %s: %f" (typeName typ) (cluster))
-
+        |> Seq.map(fun kv -> typeName kv.Key, kv.Value)
+        |> writeLogAsync "Distance.csv" title
 
     ////////////////////////////////////////////////////////////////////
     // 2. グラフを図に出力する
@@ -257,7 +228,7 @@ let mainAsync argv = async {
     let dgraph = types |> constructGraph (genDirectedGraph())
 
     // GraphVizを使用して、グラフを出力する
-    do! dgraph |> renderAsync "test.svg" RendererFormats.Svg
+    do! dgraph |> renderAsync "TypeGraph.svg" RendererFormats.Svg
 }
 
 [<EntryPoint>]
